@@ -1,322 +1,214 @@
-import React, { useState, useEffect } from "react";
-import AppContext from "./ContextFile";
-
-const StateFile = (props) => {
-  const [results, setResults] = useState([]);
-
-  const [utmAcceptanceObj, setUtmAcceptanceObj] = useState([]);
-
-  const [links, setLinks] = useState([]);
-
-  const [utmAppendedLinks, setUtmAppendedLinks] = useState([]);
-
-  const [loadings, setLoading] = useState(false);
-
-  const [gotResult, setGotResult] = useState(false);
-
-    /////api call to get all of the valid links from the email
-    const getAllValidLinks = async (acceptanceCriteria, content, type) => {
-      setLoading(true);
-      console.log('Link Extraction Started');
-      const response = await fetch(
-        `https://83051t06p5.execute-api.ap-south-1.amazonaws.com/dev/links/ExtractLinks`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ fileContent: content, fileType: type }),
-        }
-      );
-      if (response.ok) {
-        const jsonData = await response.json(); // Parse JSON response from the server
-        let filtered = [];
-        jsonData.forEach((element) => {
-            if (
-              !element.link.includes("view.explore") &&
-              !element.link.includes("profile_center") &&
-              !element.link.includes("subscription_center") &&
-              !element.link.includes("unsub_center") &&
-              !element.link.includes("aka.ms") &&
-              !element.link.includes("mailto")
-            ) {
-              //if (!filtered.includes(element)) {
-                filtered.push(element.link);
-             // }
-            }
-        });
-        if (filtered) {
-          console.log(filtered);
-          parseUTMParameters(acceptanceCriteria, filtered);
-        }
-      } else {
-        console.error("Request failed with status: " + response.status);
-      }
-    };
-
-  //parsing utm parameters and creating an object of utm parameters
-  const parseUTMParameters = (utmString, filteredLinks) => {
-    console.log("UTM parsing started");
-    const utmObject = {};
-    const searchParams = new URLSearchParams(utmString);
-
-    searchParams.forEach((value, key) => {
-      if (key !== "utm_term") {
-        utmObject[key] = value;
-      }
-    });
-
-    for (const key in utmObject) {
-      if (utmObject.hasOwnProperty(key) && typeof utmObject[key] === "string") {
-        utmObject[key] = utmObject[key].replace(/%/g, "");
-        utmObject[key] = utmObject[key].replace(/_/g, "_");
-        utmObject[key] = utmObject[key].replace(/\u200B/g, "");
-      }
-    }
-    setUtmAcceptanceObj(utmObject);
-    getUTMAppendedLinks(utmObject, filteredLinks);
-    return utmObject;
-  };
-
-  //////////doing the api call to get the utm appended links
-  const getUTMAppendedLinks = async (utmObject, filteredLinks) => {
-    let ut = utmObject;
-    console.log('Validating links with UTM Parameters');
-    console.log('Filtered Links');
-    const response = await fetch(
-      `https://6o4jy472i0.execute-api.ap-south-1.amazonaws.com/dev/links/getUtmAppendedLinks`,
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Access-Control-Allow-Origin": "*",
-        },
-        body: JSON.stringify({ links: filteredLinks }),
-      }
-    );
-    if (response.ok) {
-      const jsonData = await response.json(); // Parse JSON response from the server
-      const shahil = [];
-      jsonData.forEach((link) => {
-        if (link.includes("utm_")) {
-          if (
-            !link.includes("CPC") &&
-            !link.includes("whatsapp") &&
-            !link.includes("snapchat")
-          ) {
-            shahil.push(link);
-            return true;
-          }
-        }
-        return false;
-      });
-      setUtmAppendedLinks(shahil);
-      console.log("UTM appended links", shahil); // Log the JSON data received from the serve
-      validateAll(shahil, ut);
-    } else {
-      console.error("Request failed with status: " + response.status);
-    }
-  };
-
-  //////logic to cross check each and every link with utm parameters
-  function validateEachUtmParameters(link, acc) {
-    // console.log(link.replace(/\?.*?utm/g,'?utm'));
-    const url = new URL(link.replace(/\?.*?utm/g, "?utm"));
-    //console.log(url);
-    const searchParams = Object.fromEntries(url.searchParams.entries());
-    // console.log(searchParams);
-    const errors = [];
-    const errorMain = [];
-    // console.log(searchParams);
-
-    for (const param in acc) {
-      if (searchParams[param] !== acc[param]) {
-        //  console.log(searchParams[param]);
-        errors.push({
-          emailName: searchParams.utm_term,
-          expected: acc[param],
-          actual: searchParams[param],
-          param: param,
-          resValue: false,
-        });
-      } else {
-        //  console.log(searchParams[param]);
-        errors.push({
-          emailName: searchParams.utm_term,
-          expected: acc[param],
-          actual: searchParams[param],
-          param: param,
-          resValue: true,
-        });
-      }
-    }
-
-    if (errors.every((error) => error.resValue === true)) {
-      //  console.log('true called');
-      errorMain.push({ emailName: `${searchParams.utm_term}`, resValue: true });
-    } else {
-      //  console.log('false called');
-      errorMain.push({
-        emailName: `${searchParams.utm_term}`,
-        resValue: false,
-      });
-    }
-
-    return { errorMain, errors };
-  }
-
-  const validateAll = (finalLinks, utmObject) => {
-    let ac = utmObject;
-    const allResults = [];
-    console.log("validation started fo all");
-    finalLinks.forEach((link) => {
-      const isValid = validateEachUtmParameters(decodeURIComponent(link), ac);
-      const url = new URL(decodeURIComponent(link));
-      const searchParams = Object.fromEntries(url.searchParams.entries());
-      allResults.push({ name: searchParams.utm_term, res: isValid });
-      //console.log(isValid);
-    });
-
-    // After processing all links, set the results array
-    setResults((prevRes) => [...prevRes, ...allResults]);
-    // props.setLoading(false);
-    setLoading(false);
-    setGotResult(true);
-  };
-
-  return (
-    <AppContext.Provider
-      value={{
-        utmAcceptanceObj,
-        setUtmAcceptanceObj,
-        utmAppendedLinks,
-        results,
-        loadings,
-        setGotResult,
-        gotResult,
-        setLinks,
-        setResults,
-        getAllValidLinks
-      }}
-    >
-      {props.children}
-    </AppContext.Provider>
-  );
-};
-
-export default StateFile;
-
-
-
-
-
-import React, { useState, useContext } from 'react'
-import shapeImage from '../../images/shape.png';
-import panda from '../../images/utm.png';
+import React, { useState, useContext } from 'react';
+import Header from '../Header';
+import UtmCheckerContent from '../UTM CheckerContent/UtmCheckerContent';
+import Footer from '../Footer';
+import Loading from '../Loading/Loading';
+import { motion } from 'framer-motion';
 import ContextFile from '../backendLogic/ContextFile';
 
-function UtmCheckerContent(props) {
 
-  const context = useContext(ContextFile);
+function UTMPage(props) {
 
-  const { getAllValidLinks, setLinks } = context;
+    const context = useContext(ContextFile);
 
-  const [filteredLinks, setFilteredLinks] = useState([]);
+    const { results, loadings, setGotResult, gotResult, setResults } = context;
 
-  const [acceptanceCriteria, setAcceptanceCriteria] = useState('');
-  const [emailFile, setEmailFile] = useState();
+    const [loading, setLoading] = useState(false);
 
-  const [content, setContent] = useState();
-  const [type, setType] = useState();
+    const [viewMoreData, setViewMoreData] = useState();
 
-  const [doTest, setDoTest] = useState(true);
-
-  const utmPattern = /^(utm_source|utm_medium|utm_campaign|utm_term|utm_EmailName|Platform_Source|Date|utm_id|sfmc_id)=([^&]+)(?:&|$)/g;
-  const validLinkRegex = /^https:\/\/\S+/;
-
-
-  ///////////submitting the links and utm parameters here first I will validate
-  ///the utm and links and further proceed with the api call
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    localStorage.setItem('emailName', emailFile);
-
-    const validUtm = utmPattern.test(acceptanceCriteria);
-    if (validUtm) {
-      filteredLinks.forEach(link => {
-        const isValidLink = validLinkRegex.test(link);
-        if (isValidLink) {
-          setDoTest(true);
-        } else {
-          setDoTest(false);
-        }
-      });
-    } else {
-      window.alert('Invalid UTM');
-      setAcceptanceCriteria('');
-      return 0;
+    const closeResult = () => {
+        setGotResult(false);
+        console.log(results);
+        setResults([]);
     }
-    if (doTest) {
-       getAllValidLinks(acceptanceCriteria, content, type);
-      //console.log(result);
+
+    const viewMore = (item) => {
+        //console.log(item);
+        setViewMoreData(item);
+        document.getElementById('result-main-view').classList.add('blur-the-bg');
     }
-  }
 
-  const handleFileChange = (files) => {
-    const file = files;
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = async (e) => {
-        const fileContent = e.target.result;
-        let fileType = '';
-        
-        if (file.name.endsWith('.eml')) {
-          fileType = 'eml';
-        } else if (file.name.endsWith('.html') || file.name.endsWith('.htm')) {
-          fileType = 'html';
-        }
-
-        if (fileType) {
-          setContent(fileContent);
-          setType(fileType);
-        }        
-      };
-      reader.readAsText(file);
+    const closeViewMore = () => {
+        setViewMoreData();
+        document.getElementById('result-main-view').classList.remove('blur-the-bg');
     }
-  };
 
-  return (
-    <>
-      <div>
-        <img src={shapeImage} alt="" className="shape" />
-        <div className='containers' id='login-container'>
-          <div className='forms-container'>
-            <div className='signin-signup'>
-              <div action="" className='sign-in-form'>
-                <h2 className='title'><span>Test UTM Params...</span></h2>
-                <div className='input-field'>
-                  <i className='fas fa-link'></i>
-                  <input value={acceptanceCriteria} onChange={(e) => setAcceptanceCriteria(e.target.value)} name="utm parameters" type='text' placeholder='Acceptance Criteria'></input>
+    return (
+        <>
+            {loadings && <div className={`big-wrapper ${props.dark ? 'dark' : 'light'
+                } ${props.menuActive ? 'active' : ''} ${props.copyActive ? 'copy' : ''}`}>
+                <Loading />
+            </div>}
+            {!loadings && <div id='utm-main-page' className={`utm-parent ${gotResult ? 'blur-the-bg' : ''}`}>
+                <main id="mains">
+                    <div
+                        className={`big-wrapper ${props.dark ? 'dark' : 'light'
+                            } ${props.menuActive ? 'active' : ''} ${props.copyActive ? 'copy' : ''}`}
+                    >
+                        <Header dark={props.dark}
+                            menuActive={props.menuActive}
+                            copyActive={props.copyActive}
+                            toggleMenu={props.toggleMenu}
+                        />
+                        <UtmCheckerContent
+                            dark={props.dark}
+                            menuActive={props.menuActive}
+                            copyActive={props.copyActive}
+                            toggleMenu={props.toggleMenu}
+                            toggleAnimation={props.toggleAnimation}
+                            loading={loading}
+                            setLoading={setLoading}
+                        />
+                        <Footer toggleAnimation={props.toggleAnimation} dark={props.dark} />
+                    </div>
+                </main>
+            </div>}
+            {gotResult &&
+                <div id='result-main-view' className={`result-parent ${props.dark ? 'dark' : 'light'
+                    } ${props.menuActive ? 'active' : ''} ${props.copyActive ? 'copy' : ''}`}>
+                    <motion.div className='verification-card'
+                        initial={{ opacity: 0, scale: 0.5 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        transition={{
+                            default: {
+                                duration: 0.3,
+                                ease: [0, 0.71, 0.2, 1.01]
+                            },
+                            scale: {
+                                type: "spring",
+                                damping: 11,
+                                stiffness: 100,
+                                restDelta: 0.001
+                            }
+                        }}
+                        layoutId="shahil"
+                    >
+                        <motion.i className="fa-solid fa-xmark fa-lg cancel" onClick={closeResult}></motion.i>
+                        <div className="table-container">
+                            {/*table should be placed here*/}
+                            <table className="styled-table">
+                                <thead>
+                                    <tr>
+                                        <th>Link Name ({results.length})</th>
+                                        <th>Status</th>
+                                        <th>Find Out More</th>
+                                    </tr>
+                                </thead>
+                                <tbody className='fix-body'>
+                                    {results.map((item, index) => {
+                                        return (
+                                            <tr key={index}>
+                                                <td>{item.name}</td>
+                                                <td>{item.res.errorMain[0].resValue ? 'Passed' : 'Failed'}</td>
+                                                <td><button onClick={() => viewMore(item.res.errors)} className='view-more' style={{ backgroundColor: item.res.errorMain[0].resValue ? '#79AC78' : '#F45050' }}>view more</button></td>
+                                            </tr>
+                                        )
+                                    })}
+                                    {/* <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#79AC78' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr>
+                                    <tr>
+                                        <td>Shahil gdvgjvfevfe</td>
+                                        <td>Passednhfbehfhebf</td>
+                                        <td><button className='view-more' style={{ backgroundColor: '#F45050' }}>view more</button></td>
+                                    </tr> */}
+
+                                </tbody>
+                            </table>
+                        </div>
+                    </motion.div>
                 </div>
-                <div className='input-field emailSelector'>
-                  <i className='fas fa-envelope'></i>
-                  {emailFile && <label htmlFor="file-input">{emailFile.toString().slice(16, 40)}</label>}
-                  {!emailFile && <label htmlFor="file-input">Click here to upload the email file</label>}
-                  <input value={emailFile} onChange={(e) => { setEmailFile(e.target.value); handleFileChange(e.target.files[0]) }} id='file-input' className='emailFileSelector' accept={'.eml' || '.htm'} name="email file" type='file' placeholder='Click here to upload the email file'></input>
+            }
+            {viewMoreData &&
+                <div className={`result-parent ${props.dark ? 'dark' : 'light'
+                    } ${props.menuActive ? 'active' : ''} ${props.copyActive ? 'copy' : ''}`}>
+                    <motion.div className='verification-card'
+                        initial={{ opacity: 0, scale: 0.6 }}
+                        animate={{ opacity: 1, scale: 0.9, display: 'block' }}
+                        transition={{
+                            default: {
+                                duration: 0.5,
+                                ease: [0, 0.71, 0.2, 1.01]
+                            },
+                            scale: {
+                                type: "spring",
+                                damping: 11,
+                                stiffness: 100,
+                                restDelta: 0.001
+                            }
+                        }}
+                        layoutId="shahil2"
+                    >
+                        <motion.i className="fa-solid fa-xmark fa-lg cancel" onClick={closeViewMore}></motion.i>
+                        <div className="table-container">
+                            {/*table should be placed here*/}
+                            <table className="styled-table">
+                                <thead>
+                                    <tr>
+                                        <th>UTM Term</th>
+                                        <th>UTM Parameter</th>
+                                        <th>Expected Value</th>
+                                        <th>Actual Value</th>
+                                    </tr>
+                                </thead>
+                                <tbody className='fix-body'>
+                                    {viewMoreData.map((item, index) => {
+                                        return (
+                                            <tr key={index}>
+                                                <td className='bold-content'>{item.emailName}</td>
+                                                <td className='bold-content'>{item.param}</td>
+                                                <td className='bold-content'>{item.expected}</td>
+                                                <td className='bold-content' style={{ color: item.resValue ? '#79AC78' : '#F45050' }}>{item.actual}</td>
+                                            </tr>
+                                        )
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
+                    </motion.div>
                 </div>
-                <button disabled={acceptanceCriteria === '' && emailFile === ''} className="submitBtn" onClick={handleSubmit}>Submit</button>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div className='panels-container'>
-          <div className='panel left-panel'>
-            <img src={panda} className='image' alt=''></img>
-          </div>
-        </div>
-      </div>
-    </>
-  )
+            }
+        </>
+
+    );
 }
 
-export default UtmCheckerContent
+export default UTMPage;
